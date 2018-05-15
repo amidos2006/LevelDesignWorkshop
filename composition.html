@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Composition - Level Design Workshop</title>
+    <style>
+        .center {
+            display: block;
+            margin: auto;
+            text-align: center;
+        }
+
+        canvas {
+            border: 2px solid rgb(73, 107, 54);
+            image-rendering: optimizeSpeed;
+            /* Older versions of FF          */
+            image-rendering: -moz-crisp-edges;
+            /* FF 6.0+                       */
+            image-rendering: -webkit-optimize-contrast;
+            /* Safari                        */
+            image-rendering: -o-crisp-edges;
+            /* OS X & Windows Opera (12.02+) */
+            image-rendering: pixelated;
+            /* Awesome future-browsers       */
+            -ms-interpolation-mode: nearest-neighbor;
+            /* IE                            */
+        }
+    </style>
+</head>
+
+<body onload="startGame()">
+    <h2 class="center">
+        Composition
+    </h2>
+    <p></p>
+    <canvas id="game" class="center"></canvas>
+    <p></p>
+    <p class="center">
+        Controls: Left and Right to Move - Up to Jump
+    </p>
+    <input style="position: absolute; left:-1000px; top:-1000px;" id="copyURL" type="text" readonly/>
+    <script>
+        let Entity = function (x, y, img, index) {
+            this.x = x;
+            this.y = y;
+            this.img = img;
+            this.index = index;
+            this.alpha = 1;
+        }
+
+        Entity.prototype.render = function (context) {
+            context.save();
+            context.translate(Math.floor(this.x), Math.floor(this.y));
+            context.globalAlpha = this.alpha;
+            let xNum = Math.floor(this.img.width / 7);
+            let yNum = Math.floor(this.img.height / 7);
+            let sx = (this.index % xNum) * 7;
+            let sy = (Math.floor(this.index / xNum) % yNum) * 7;
+            context.drawImage(this.img, sx, sy, 7, 7, 0, 0, 7, 7);
+            context.restore();
+        }
+
+        let Button = function (x, y, img, index) {
+            Entity.call(this, x, y, img, index);
+            this.collider = new BoxCollider(0, 0, 7, 7, this);
+        }
+
+        Button.prototype = Object.create(Entity.prototype);
+
+        Button.prototype.click = function () {
+            if (Engine.mouseClick && this.collider.collidePoint(Engine.mouseX, Engine.mouseY)) {
+                return true;
+            }
+            return false;
+        }
+
+        let Spike = function(x, y, img){
+            Entity.call(this, x, y, img, 2);
+            this.collider = new BoxCollider(1, 1, 5, 5, this);
+        }
+        Spike.prototype = Object.create(Entity.prototype);
+
+        let Door = function(x, y, img){
+            Entity.call(this, x, y, img, 3);
+            this.collider = new BoxCollider(0, 0, 7, 7, this);
+        }
+        Door.prototype = Object.create(Entity.prototype);
+
+        let Flag = function(x, y, img){
+            Entity.call(this, x, y, img, 4);
+            this.collider = new BoxCollider(0, 0, 7, 7, this);
+        }
+        Flag.prototype = Object.create(Entity.prototype);
+
+        let Block = function(x, y, img){
+            Entity.call(this, x, y, img, 0);
+            this.collider = new BoxCollider(0, 0, 7, 7, this);
+        }
+        Block.prototype = Object.create(Entity.prototype);
+
+        let Player = function(x, y, img){
+            Entity.call(this, x, y, img, 5);
+            this.collider = new BoxCollider(1, 2, 4, 4, this);
+            this.frames = [5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8];
+            this.currentFrame = 0;
+            this.velocity = {x: 0, y: 0};
+            this.halved = false;
+        }
+        Player.prototype = Object.create(Entity.prototype);
+        
+        Player.prototype.update = function(game){
+            let direction = 0;
+            let jump = false;
+            let grounded = game.checkCollide(this, game.blocks, 0, 1) != null;
+            if(Engine.keyPressed[39]){
+                direction += 1;
+            }
+            if(Engine.keyPressed[37]){
+                direction -= 1;
+            }
+            if(Engine.keyPressed[38]){
+                if(grounded){
+                    this.halved = false;
+                    jump = true;
+                }
+            }
+            else if(!this.halved){
+                this.halved = true;
+                if(this.velocity.y < 0){
+                    this.velocity.y *= 0.5;
+                }
+            }
+            this.currentFrame += direction;
+            if(this.currentFrame >= this.frames.length){
+                this.currentFrame = 0;
+            }
+            if(this.currentFrame < 0){
+                this.currentFrame = this.frames.length - 1;
+            }
+            if(direction != 0){
+                this.velocity.x = 0.75 * direction;
+            }
+            else{
+                let signBefore = Math.sign(this.velocity.x);
+                this.velocity.x -= Math.sign(this.velocity.x) * 0.15;
+                if(Math.sign(this.velocity.x) != signBefore){
+                    this.velocity.x = 0;
+                }
+            }
+            if(jump){
+                this.velocity.y = -1.05;
+            }
+            if (!grounded) {
+                this.velocity.y += 0.04;
+                if (this.velocity.y > 2) {
+                    this.velocity.y = 2;
+                }
+            }
+            for(let i=0; i<Math.abs(this.velocity.x); i++){
+                let shift = Math.sign(this.velocity.x) * Math.min(Math.abs(this.velocity.x), 1);
+                if(game.checkCollide(this, game.blocks, shift, 0) == null){
+                    this.x += shift;
+                }
+                else{
+                    this.velocity.x = 0;
+                    break;
+                }
+            }
+            for (let i = 0; i < Math.abs(this.velocity.y); i++) {
+                let shift = Math.sign(this.velocity.y) * Math.min(Math.abs(this.velocity.y), 1);
+                if (game.checkCollide(this, game.blocks, 0, shift) == null) {
+                    this.y += shift;
+                }
+                else{
+                    this.velocity.y = 0;
+                    break;
+                }
+            }
+        }
+
+        Player.prototype.render = function(context){
+            this.index = this.frames[this.currentFrame];
+            Entity.prototype.render.call(this, context);
+        }
+
+        let BackgroundTile = function(img){
+            Entity.call(this, 0, 0, img, 10);
+        }
+        BackgroundTile.prototype = Object.create(Entity.prototype);
+
+        BackgroundTile.prototype.changeColor = function(win){
+            this.index = 10;
+            if(win){
+                this.index = 9;
+            }
+        }
+
+        let RunningGame = function (width, height, img) {
+            this.player = new Player(0, 0, img);
+            this.blocks = [];
+            this.flag = [];
+            this.doors = [];
+            this.spikes = [];
+            this.backgroundTile = new BackgroundTile(img);
+            this.gridTile = new Entity(0, 0, img, 12);
+            this.respwanTile = new Entity(0, 0, img, 11);
+            this.respawnLocation = {x:0, y:0};
+            this.width = width;
+            this.height = height;
+            this.animationAlpha = 0;
+        }
+
+        RunningGame.prototype.initialize = function (map, img) {
+            this.blocks.length = 0;
+            this.flag.length = 0;
+            this.doors.length = 0;
+            this.spikes.length = 0;
+            this.respawnLocation.x = 0;
+            this.respawnLocation.y = 0;
+            this.animationAlpha = 0;
+            this.player.x = 0;
+            this.player.y = 0;
+            
+            for(let y = 0; y<map.length; y++){
+                for(let x = 0; x<map[y].length; x++){
+                    switch(map[y][x]){
+                        case 0:
+                            this.blocks.push(new Block(x * 7, y * 7, img));
+                            break;
+                        case 2:
+                            this.spikes.push(new Spike(x * 7, y * 7, img));
+                            break;
+                        case 3:
+                            this.doors.push(new Door(x * 7, y * 7, img));
+                            break;
+                        case 4:
+                            this.flag.push(new Flag(x * 7, y * 7, img));
+                            break;
+                        case 5:
+                            this.player.x = x * 7;
+                            this.player.y = y * 7;
+                            this.respawnLocation.x = x * 7;
+                            this.respawnLocation.y = y * 7;
+                            break;
+                    }
+                }
+            }
+        }
+
+        RunningGame.prototype.checkCollide = function(object, array, sx, sy){
+            if(sx == undefined){
+                sx = 0;
+            }
+            if(sy == undefined){
+                sy = 0;
+            }
+            for(let o of array){
+                if(object.collider.collideOther(o.collider, sx, sy)){
+                    return o;
+                }
+            }
+            return null;
+        }
+
+        RunningGame.prototype.update = function () {
+            this.player.update(this);
+            if(this.checkCollide(this.player, this.spikes) != null){
+                this.animationAlpha = 1;
+                this.player.x = this.respawnLocation.x;
+                this.player.y = this.respawnLocation.y;
+            }
+            if(this.player.y > Engine.height() + 10){
+                this.animationAlpha = 1;
+                this.player.x = this.respawnLocation.x;
+                this.player.y = this.respawnLocation.y;
+            }
+            if(this.checkCollide(this.player, this.doors) != null){
+                this.backgroundTile.changeColor(true);
+            }
+            else{
+                this.backgroundTile.changeColor(false);
+            }
+            let flag = this.checkCollide(this.player, this.flag);
+            if(flag != null){
+                this.respawnLocation.x = flag.x;
+                this.respawnLocation.y = flag.y;
+            }
+
+            this.animationAlpha -= 0.08;
+            if(this.animationAlpha <= 0){
+                this.animationAlpha = 0;
+            }
+        }
+
+        RunningGame.prototype.render = function (context) {
+            for(let x=0; x<this.width; x++){
+                for(let y=0; y<this.height; y++){
+                    this.backgroundTile.x = x * 7;
+                    this.backgroundTile.y = y * 7;
+                    this.backgroundTile.render(context);
+                    this.gridTile.x = x * 7;
+                    this.gridTile.y = y * 7;
+                    this.gridTile.render(context);
+                }
+            }
+            for (let x = 0; x < this.width; x++) {
+                this.backgroundTile.x = x * 7;
+                this.backgroundTile.y = 10 * 7;
+                this.backgroundTile.render(context);
+            }
+            for(let b of this.blocks){
+                b.render(context);
+            }
+            for(let f of this.flag){
+                f.render(context);
+            }
+            for(let d of this.doors){
+                d.render(context);
+            }
+            for(let s of this.spikes){
+                s.render(context);
+            }
+            this.player.render(context);
+            for (let x = 0; x < this.width; x++) {
+                for (let y = 0; y < this.height + 1; y++) {
+                    this.respwanTile.x = x * 7;
+                    this.respwanTile.y = y * 7;
+                    this.respwanTile.alpha = this.animationAlpha;
+                    this.respwanTile.render(context);
+                }
+            }
+        }
+
+        let MainControls = function (img) {
+            this.editPlay = [new Button(50 * 7, 10 * 7, img, 13), new Button(51 * 7, 10 * 7, img, 14)];
+            this.copyURL = [new Button(53 * 7 - 2, 10 * 7, img, 17), new Button(54 * 7 - 2, 10 * 7, img, 18)];
+        }
+
+        MainControls.prototype.update = function () {
+            for (let e of this.editPlay) {
+                if (e.click()) {
+                    switchMode(Engine.map.toString());
+                }
+            }
+        }
+
+        MainControls.prototype.render = function (context) {
+            for (let i = 0; i < this.editPlay.length; i++) {
+                let base = 13;
+                if (Engine.mode == 1) {
+                    base = 15;
+                }
+                this.editPlay[i].index = base + i;
+                this.editPlay[i].render(context);
+            }
+            for (let e of this.copyURL) {
+                e.render(context);
+            }
+        }
+
+        let EditingControls = function (img) {
+            this.index = 0;
+            this.tools = [
+                new Button(0 * 7, 10 * 7, img, 9), 
+                new Button(1 * 7, 10 * 7, img, 0),
+                new Button(2 * 7, 10 * 7, img, 5),
+                new Button(3 * 7, 10 * 7, img, 3),
+                new Button(4 * 7, 10 * 7, img, 2),
+                new Button(5 * 7, 10 * 7, img, 4)
+            ];
+            this.selectionEntity = new Entity(0, 0, img, 1);
+        }
+
+        EditingControls.prototype.getSelectedIndex = function(){
+            return this.tools[this.index].index;
+        }
+
+        EditingControls.prototype.update = function(){
+            for(let i=0; i<this.tools.length; i++){
+                if (Engine.mouseClick && this.tools[i].click()) {
+                    this.index = i;
+                    break;
+                }
+            }
+        }
+
+        EditingControls.prototype.render = function(context){
+            for(let i=0; i<this.tools.length; i++){
+                this.tools[i].render(context);
+            }
+            this.selectionEntity.x = this.tools[this.index].x;
+            this.selectionEntity.y = this.tools[this.index].y;
+            this.selectionEntity.render(context);
+        }
+
+        let EditingMap = function (width, height, img) {
+            this.width = width;
+            this.height = height;
+            this.img = img;
+            this.backgroundTile = new Entity(0, 0, img, 9);
+            this.gridTile = new Entity(0, 0, img, 12);
+            this.tools = new EditingControls(img);
+            this.map = [];
+            for (let y = 0; y < height; y++) {
+                this.map.push([]);
+                for (let x = 0; x < width; x++) {
+                    this.map[y].push(9);
+                }
+            }
+            this.mapRenderEntity = new Entity(0, 0, img, 9);
+            this.editingArea = new BoxCollider(0, 0, width * 7, height * 7);
+        }
+
+        EditingMap.prototype.initialize = function (level) {
+            let x=0;
+            let y=0;
+            for(let c of level){
+                let decoded = this.getCorrectIndex(c);
+                for(let i=0; i<decoded.value; i++){
+                    this.map[y][x] = decoded.index;
+                    y+=1;
+                    if(y >= this.height){
+                        y = 0;
+                        x+=1;
+                    }
+                    if(x >= this.width){
+                        break;
+                    }
+                }
+            }
+        }
+
+        EditingMap.prototype.getCorrectIndex = function(letter){
+            let letterIndex = letter.charCodeAt(0);
+            let index = -1;
+            let value = 0;
+            if(letterIndex <= "H".charCodeAt(0)){
+                index = 9;
+                value = letterIndex - "A".charCodeAt(0) + 1;
+            }
+            else if(letterIndex <= "P".charCodeAt(0)){
+                index = 0;
+                value = letterIndex - "I".charCodeAt(0) + 1;
+            }
+            else if(letterIndex <= "X".charCodeAt(0)){
+                index = 5;
+                value = letterIndex - "Q".charCodeAt(0) + 1;
+            }
+            else if(letterIndex <= "Z".charCodeAt(0)){
+                index = 3;
+                value = letterIndex - "Y".charCodeAt(0) + 1;
+            }
+            else if(letterIndex <= "f".charCodeAt(0)){
+                index = 3;
+                value = letterIndex - "a".charCodeAt(0) + 1;
+            }
+            else if(letterIndex <= "n".charCodeAt(0)){
+                index = 2;
+                value = letterIndex - "g".charCodeAt(0) + 1;
+            }
+            else{
+                index = 4;
+                value = letterIndex - "o".charCodeAt(0) + 1;
+            }
+            
+            return {index: index, value:value};
+        }
+
+        EditingMap.prototype.getCorrectLetter = function(index, value){
+            let startingIndex = "A";
+            switch (index) {
+                case 0:
+                    startingIndex = "I";
+                    break;
+                case 2:
+                    startingIndex = "g";
+                    break;
+                case 3:
+                    startingIndex = "Y";
+                    if (value > 2) {
+                        startingIndex = "a";
+                        value -= 2;
+                    }
+                    break;
+                case 4:
+                    startingIndex = "o";
+                    break;
+                case 5:
+                    startingIndex = "Q";
+                    break;
+                case 9:
+                    startingIndex = "A";
+                    break;
+            }
+            return String.fromCharCode(startingIndex.charCodeAt(0) + value - 1);
+        }
+
+        EditingMap.prototype.toString = function () {
+            let result = "";
+            let value = 0;
+            let previousIndex = -1;
+            for(let x=0; x<this.width; x++){
+                for(let y=0; y<this.height; y++){
+                    let currentIndex = this.map[y][x];
+                    if(previousIndex != -1 && (value == 8 || currentIndex != previousIndex)){
+                        result += this.getCorrectLetter(previousIndex, value);
+                        value = 1;
+                    }
+                    else{
+                        value += 1;
+                    }
+                    previousIndex = currentIndex;
+                }
+            }
+            result += this.getCorrectLetter(previousIndex, value);
+            return result;
+        }
+
+        EditingMap.prototype.update = function () {
+            this.tools.update();
+            if(Engine.mouseDown && this.editingArea.collidePoint(Engine.mouseX, Engine.mouseY)){
+                let x = Math.floor(Engine.mouseX / 7);
+                let y = Math.floor(Engine.mouseY / 7);
+                this.map[y][x] = this.tools.getSelectedIndex();
+            }
+        }
+
+        EditingMap.prototype.render = function (context) {
+            for (let x = 0; x < this.width; x++) {
+                for (let y = 0; y < this.height; y++) {
+                    this.backgroundTile.x = x * 7;
+                    this.backgroundTile.y = y * 7;
+                    this.backgroundTile.render(context);
+                    this.gridTile.x = x * 7;
+                    this.gridTile.y = y * 7;
+                    this.gridTile.render(context);
+                }
+            }
+            for (let x = 0; x < this.width; x++) {
+                this.backgroundTile.x = x * 7;
+                this.backgroundTile.y = this.height * 7;
+                this.backgroundTile.render(context);
+            }
+            for (let x = 0; x < this.width; x++) {
+                for (let y = 0; y < this.height; y++) {
+                    this.mapRenderEntity.x = x * 7;
+                    this.mapRenderEntity.y = y * 7;
+                    if(this.map[y][x] != 9){
+                        this.mapRenderEntity.index = this.map[y][x];
+                        this.mapRenderEntity.render(context);
+                    }
+                }
+            }
+            this.tools.render(context);
+        }
+
+        let BoxCollider = function (x, y, width, height, entity) {
+            this.originX = x;
+            this.originY = y;
+            this.width = width;
+            this.height = height;
+            this.entity = null;
+            if (entity != undefined) {
+                this.entity = entity;
+            }
+        }
+
+        BoxCollider.prototype.collidePoint = function (px, py) {
+            let xTop = this.originX;
+            let yTop = this.originY;
+            let xBot = this.originX + this.width;
+            let yBot = this.originY + this.height;
+            if (this.entity != null) {
+                xTop += this.entity.x;
+                yTop += this.entity.y;
+                xBot += this.entity.x;
+                yBot += this.entity.y;
+            }
+            if (px <= xTop || py <= yTop || px >= xBot || py >= yBot) {
+                return false;
+            }
+            return true;
+        }
+
+        BoxCollider.prototype.collideOther = function (other, sx, sy) {
+            let xTop_1 = this.originX + sx;
+            let yTop_1 = this.originY + sy;
+            let xBot_1 = this.originX + this.width + sx;
+            let yBot_1 = this.originY + this.height + sy;
+            if (this.entity != null) {
+                xTop_1 += this.entity.x;
+                yTop_1 += this.entity.y;
+                xBot_1 += this.entity.x;
+                yBot_1 += this.entity.y;
+            }
+            let xTop_2 = other.originX;
+            let yTop_2 = other.originY;
+            let xBot_2 = other.originX + other.width;
+            let yBot_2 = other.originY + other.height;
+            if (other.entity != null) {
+                xTop_2 += other.entity.x;
+                yTop_2 += other.entity.y;
+                xBot_2 += other.entity.x;
+                yBot_2 += other.entity.y;
+            }
+            if (xTop_1 > xBot_2 || xTop_2 > xBot_1 || yTop_1 > yBot_2 || yTop_2 > yBot_1) {
+                return false;
+            }
+            return true;
+        }
+
+        let Engine = {
+            initialize: function (width, height, scale) {
+                this.canvas = document.getElementById("game");
+                this.canvas.width = width;
+                this.canvas.height = height;
+                this.canvas.style.width = width * scale + "px";
+                this.canvas.style.height = height * scale + "px";
+                this.copyURL = document.getElementById("copyURL");
+                this.context = this.canvas.getContext("2d");
+                this.img = new Image();
+                this.img.src = "assets/composition.png";
+
+                this.mouseX = 0;
+                this.mouseY = 0;
+                this.mouseDown = false;
+                this.mouseClick = false;
+                this.keyPressed = {};
+
+                this.mode = 0;
+                this.map = new EditingMap(55, 10, this.img);
+                this.game = new RunningGame(55, 10, this.img);
+                this.mainControls = new MainControls(this.img);
+            },
+
+            origin: function () {
+                return { x: this.canvas.getBoundingClientRect().x, y: this.canvas.getBoundingClientRect().y };
+            },
+
+            scale: function () {
+                return parseFloat(this.canvas.style.width.split("px")[0]) / this.width();
+            },
+
+            width: function () {
+                return this.canvas.width;
+            },
+
+            height: function () {
+                return this.canvas.height;
+            },
+
+            update: function () {
+                if (this.mode == 0) {
+                    this.map.update();
+                }
+                else {
+                    this.game.update();
+                }
+                this.mainControls.update();
+                this.mouseClick = false;
+            },
+
+            render: function () {
+                this.context.clearRect(0, 0, this.width(), this.height());
+                if (this.mode == 0) {
+                    this.map.render(this.context);
+                }
+                else {
+                    this.game.render(this.context);
+                }
+                this.mainControls.render(this.context);
+            }
+        }
+
+        function switchMode(level) {
+            Engine.map.initialize(level);
+            Engine.game.initialize(Engine.map.map, Engine.img);
+            Engine.mode = 1 - Engine.mode;
+        }
+
+        function copyURL() {
+            Engine.copyURL.value = window.location.href.split("\?")[0] + "?level=" + Engine.map.toString();
+            Engine.copyURL.select();
+            document.execCommand("Copy");
+            Engine.canvas.focus();
+        }
+
+        function startGame() {
+            Engine.initialize(385, 77, 2);
+            window.addEventListener("mousedown", function (e) {
+                Engine.mouseDown = true;
+                Engine.mouseClick = true;
+                for (let e of Engine.mainControls.copyURL) {
+                    if (e.click()) {
+                        copyURL();
+                    }
+                }
+            });
+            window.addEventListener("mousemove", function (e) {
+                let scale = Engine.scale();
+                let origin = Engine.origin();
+                Engine.mouseX = (e.pageX - origin.x) / scale;
+                Engine.mouseY = (e.pageY - origin.y) / scale;
+            });
+            window.addEventListener("mouseup", function (e) {
+                Engine.mouseDown = false;
+                Engine.mouseClick = false;
+            });
+            window.addEventListener("keydown", function (e) {
+                Engine.keyPressed[e.keyCode] = true;
+            });
+            window.addEventListener("keyup", function (e) {
+                Engine.keyPressed[e.keyCode] = false;
+            });
+            window.requestAnimationFrame(gameLoop);
+            if (window.location.search.length > 0) {
+                let level = window.location.search.split("=")[1];
+                switchMode(level);
+            }
+        }
+
+        function gameLoop() {
+            Engine.update();
+            Engine.render();
+            window.requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+
+</html>
